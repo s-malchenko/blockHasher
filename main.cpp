@@ -82,7 +82,6 @@ int main(int argc, char **argv)
     {
         if (parser.cmdOptionExists("-m"))
         {
-            cout << "multi" << endl;
             hasherPtr = make_unique<MultiThreadHasher>(blockSize);
         }
         else
@@ -90,7 +89,9 @@ int main(int argc, char **argv)
             hasherPtr = make_unique<SingleThreadHasher>(blockSize);
         }
 
-        cout << hasherPtr.get() << endl;
+        cout << "Hashing " << input << " by blocks of " << blockSize <<
+         " to file " << output << " ..." << endl;
+
         hasherPtr->Hash(input, output);
     }
     catch (const exception &e)
@@ -100,9 +101,6 @@ int main(int argc, char **argv)
     }
 
     auto msec = duration_cast<milliseconds>(steady_clock::now() - start).count();
-
-    cout << input << " hashed by blocks of " << blockSize <<
-         " to file " << output << " in " << msec << " milliseconds" << endl;
-
+    cout << "Hashed in " << msec << " milliseconds" << endl;
     return 0;
 }

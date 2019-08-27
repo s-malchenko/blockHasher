@@ -4,7 +4,6 @@
 #include <exception>
 #include <thread>
 #include <fstream>
-#include <iostream>
 #include <utility>
 #include <functional>
 
@@ -35,27 +34,22 @@ SingleThreadHasher::SingleThreadHasher(size_t blockSize) : BlockHasher(blockSize
 void SingleThreadHasher::Hash(const string &inputFile, const string &outputFile)
 {
     auto [input, output] = openFiles(inputFile, outputFile);
-    vector<uint8_t> data;
-    data.reserve(_size);
+    auto data = make_shared<Buffer>(_size);
 
-    uint8_t b;
-    while (input->read(reinterpret_cast<char *>(&b), sizeof(b)))
+    while (true)
     {
-        data.push_back(b);
+        size_t count =  input->readsome(reinterpret_cast<char *>(data->get()), _size);
+        data->setSize(count);
+        *output << md5(data->get(), data->getSize()) << endl;
 
-        if (data.size() == _size)
+        if (count < _size)
         {
-            *output << md5(data.data(), data.size()) << endl;
-            data.clear();
+            break;
         }
-    }
 
-    if (!data.empty())
-    {
-        *output << md5(data.data(), data.size()) << endl;
+        data = make_shared<Buffer>(_size);
     }
 }
-
 
 MultiThreadHasher::MultiThreadHasher(size_t blockSize, size_t threads) :
     BlockHasher(blockSize)
@@ -66,26 +60,23 @@ MultiThreadHasher::MultiThreadHasher(size_t blockSize, size_t threads) :
 void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &outputFile)
 {
     auto [input, output] = openFiles(inputFile, outputFile);
-    vector<uint8_t> data;
-    data.reserve(_size);
+    auto data = make_shared<Buffer>(_size);
 
     _run = true;
     thread writer(&MultiThreadHasher::writerThread, this, output);
 
-    uint8_t b;
-    while (input->read(reinterpret_cast<char *>(&b), sizeof(b)))
+    while (true)
     {
-        data.push_back(b);
-
-        if (data.size() == _size)
-        {
-            addHasherThread(data);
-        }
-    }
-
-    if (!data.empty())
-    {
+        size_t count =  input->readsome(reinterpret_cast<char *>(data->get()), _size);
+        data->setSize(count);
         addHasherThread(data);
+
+        if (count < _size)
+        {
+            break;
+        }
+
+        data = make_shared<Buffer>(_size);
     }
 
     _run = false;
@@ -96,33 +87,33 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
     }
 }
 
-string MultiThreadHasher::hashOneBlock(vector<uint8_t> data)
+string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data)
 {
-    auto result = md5(data.data(), data.size());
-    _writerCv.notify_all();
+    auto result = md5(data->get(), data->getSize());
+    _writerCv.notify_all(); // notify writer to begin writing file
     return result;
 }
 
-void MultiThreadHasher::addHasherThread(vector<uint8_t> &data)
+void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
 {
     unique_lock<mutex> locker(_m);
 
     if (_resultQueue.size() > _threads)
     {
-        _readerCv.wait(locker); // waiting a future to finish
+        _readerCv.wait(locker); // waiting a future to finish and free memory
     }
 
-    _resultQueue.push(async(&MultiThreadHasher::hashOneBlock, this, move(data)));
+    _resultQueue.push(async(&MultiThreadHasher::hashOneBlock, this, data));
 }
 
 void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
 {
-
     string hash;
     while (_run)
     {
         {
             unique_lock<mutex> locker(_m);
+
             if (_resultQueue.empty())
             {
                 _writerCv.wait(locker);
@@ -132,15 +123,15 @@ void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
             hash = _resultQueue.front().get();
             _resultQueue.pop();
             _readerCv.notify_all();
-        }
+        } // end of mutex-blocking code, file output witout block
 
-        *output << hash << "\n";
+        *output << hash << endl;
     }
 
     while (!_resultQueue.empty())
     {
         _resultQueue.front().wait();
-        *output << _resultQueue.front().get() << "\n";
+        *output << _resultQueue.front().get() << endl;
         _resultQueue.pop();
     }
 }
