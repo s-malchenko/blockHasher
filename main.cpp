@@ -6,8 +6,10 @@
 #include <string>
 #include <vector>
 #include <exception>
+#include <chrono>
 
 using namespace std;
+using namespace std::chrono;
 
 static void printUsage()
 {
@@ -71,12 +73,24 @@ int main(int argc, char **argv)
         }
     }
 
+    unique_ptr<BlockHasher> hasherPtr;
     string input(argv[1]);
     string output(argv[2]);
+    auto start = steady_clock::now();
 
     try
     {
-        unique_ptr<BlockHasher> hasherPtr = make_unique<SingleThreadHasher>(blockSize);
+        if (parser.cmdOptionExists("-m"))
+        {
+            cout << "multi" << endl;
+            hasherPtr = make_unique<MultiThreadHasher>(blockSize);
+        }
+        else
+        {
+            hasherPtr = make_unique<SingleThreadHasher>(blockSize);
+        }
+
+        cout << hasherPtr.get() << endl;
         hasherPtr->Hash(input, output);
     }
     catch (const exception &e)
@@ -84,6 +98,11 @@ int main(int argc, char **argv)
         cout << "Error: " << e.what() << endl;
         return -1;
     }
+
+    auto msec = duration_cast<milliseconds>(steady_clock::now() - start).count();
+
+    cout << input << " hashed by blocks of " << blockSize <<
+         " to file " << output << " in " << msec << " milliseconds" << endl;
 
     return 0;
 }
