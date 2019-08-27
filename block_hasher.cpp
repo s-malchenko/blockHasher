@@ -9,6 +9,14 @@
 
 using namespace std;
 
+static inline void checkEptr(exception_ptr eptr)
+{
+    if (eptr)
+    {
+        rethrow_exception(eptr);
+    }
+}
+
 static pair<shared_ptr<ifstream>, shared_ptr<ofstream>> openFiles(const string &inputFile, const string &outputFile)
 {
     auto input = make_shared<ifstream>(inputFile, ios::binary);
@@ -76,6 +84,7 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
             break;
         }
 
+        checkEptr(_exceptPtr); // current method is always in main thread so we can safely rethrow
         data = make_shared<Buffer>(_size);
     }
 
@@ -85,13 +94,34 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
     {
         writer.join();
     }
+
+    checkEptr(_exceptPtr);
 }
 
 string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data)
 {
-    auto result = md5(data->get(), data->getSize());
-    _writerCv.notify_all(); // notify writer to begin writing file
-    return result;
+    try
+    {
+        auto result = md5(data->get(), data->getSize());
+        _writerCv.notify_all(); // notify writer to begin writing file
+        return result;
+    }
+    catch (const exception &e)
+    {
+        {
+            unique_lock<mutex> locker(_eMutex);
+            _exceptPtr = current_exception();
+        }
+
+        _readerCv.notify_all(); // awake probably sleeping thread to detect exception
+
+        while (true)
+        {
+            this_thread::sleep_for(1s);
+        }
+    }
+
+    return {}; // warning fix, actually we'll never get here
 }
 
 void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
@@ -108,30 +138,42 @@ void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
 
 void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
 {
-    string hash;
-    while (_run)
+    try
+    {
+        string hash;
+        while (_run)
+        {
+            {
+                unique_lock<mutex> locker(_m);
+
+                if (_resultQueue.empty())
+                {
+                    _writerCv.wait(locker);
+                }
+
+                _resultQueue.front().wait();
+                hash = _resultQueue.front().get();
+                _resultQueue.pop();
+                _readerCv.notify_all();
+            } // end of mutex-blocking code, file output witout block
+
+            *output << hash << endl;
+        }
+
+        while (!_resultQueue.empty())
+        {
+            _resultQueue.front().wait();
+            *output << _resultQueue.front().get() << endl;
+            _resultQueue.pop();
+        }
+    }
+    catch (const exception &e)
     {
         {
-            unique_lock<mutex> locker(_m);
+            unique_lock<mutex> locker(_eMutex);
+            _exceptPtr = current_exception();
+        }
 
-            if (_resultQueue.empty())
-            {
-                _writerCv.wait(locker);
-            }
-
-            _resultQueue.front().wait();
-            hash = _resultQueue.front().get();
-            _resultQueue.pop();
-            _readerCv.notify_all();
-        } // end of mutex-blocking code, file output witout block
-
-        *output << hash << endl;
-    }
-
-    while (!_resultQueue.empty())
-    {
-        _resultQueue.front().wait();
-        *output << _resultQueue.front().get() << endl;
-        _resultQueue.pop();
+        _readerCv.notify_all(); // awake sleeping thread to detect exception
     }
 }

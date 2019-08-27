@@ -49,37 +49,37 @@ private:
 
 int main(int argc, char **argv)
 {
-    if (argc < 3)
+    try
     {
-        printUsage();
-        return -1;
-    }
-
-    size_t blockSize = 1024 * 1024; // 1 MB default block size
-
-    auto parser = InputParser(argc, argv);
-    auto sizeStr = parser.getCmdOption("-b");
-
-    if (!sizeStr.empty())
-    {
-        try
-        {
-            blockSize = stoll(sizeStr);
-        }
-        catch (...)
+        if (argc < 3)
         {
             printUsage();
             return -1;
         }
-    }
 
-    unique_ptr<BlockHasher> hasherPtr;
-    string input(argv[1]);
-    string output(argv[2]);
-    auto start = steady_clock::now();
+        size_t blockSize = 1024 * 1024; // 1 MB default block size
 
-    try
-    {
+        auto parser = InputParser(argc, argv);
+        auto sizeStr = parser.getCmdOption("-b");
+
+        if (!sizeStr.empty())
+        {
+            try
+            {
+                blockSize = stoll(sizeStr);
+            }
+            catch (...)
+            {
+                printUsage();
+                return -1;
+            }
+        }
+
+        unique_ptr<BlockHasher> hasherPtr;
+        string input(argv[1]);
+        string output(argv[2]);
+        auto start = steady_clock::now();
+
         if (parser.cmdOptionExists("-m"))
         {
             hasherPtr = make_unique<MultiThreadHasher>(blockSize);
@@ -90,9 +90,11 @@ int main(int argc, char **argv)
         }
 
         cout << "Hashing " << input << " by blocks of " << blockSize <<
-         " to file " << output << " ..." << endl;
+             " to file " << output << " ..." << endl;
 
         hasherPtr->Hash(input, output);
+        auto msec = duration_cast<milliseconds>(steady_clock::now() - start).count();
+        cout << "Hashed in " << msec << " milliseconds" << endl;
     }
     catch (const exception &e)
     {
@@ -100,7 +102,5 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    auto msec = duration_cast<milliseconds>(steady_clock::now() - start).count();
-    cout << "Hashed in " << msec << " milliseconds" << endl;
     return 0;
 }
