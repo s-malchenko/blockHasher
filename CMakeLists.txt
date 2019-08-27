@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.8.0)
 project(blockHasher)
 
 add_executable( blockHasher
+                block_hasher.cpp
+                md5.cpp
                 main.cpp)
 
 target_include_directories(blockHasher PRIVATE ./)
