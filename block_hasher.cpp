@@ -61,7 +61,7 @@ MultiThreadHasher::MultiThreadHasher(size_t blockSize, size_t threads) :
 void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &outputFile)
 {
     auto [input, output] = openFiles(inputFile, outputFile);
-    auto data = make_shared<Buffer>(_size * _threads); // buffer enough for data to process by all parallel threads
+    auto data = make_shared<Buffer>(_size); // buffer for data to process by one thread
 
     _run = true;
     thread writer(&MultiThreadHasher::writerThread, this, output);
@@ -73,13 +73,7 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
         // can be faster with large block size.
         size_t count = input->readsome(reinterpret_cast<char *>(data->get()), data->getCapacity());
         data->setSize(count);
-        size_t offset = 0;
-
-        while (offset < count)
-        {
-            addHasherThread(data, offset);
-            offset += _size; // last segment of one buffer handles in hashOneBlock
-        }
+        addHasherThread(data);
 
         if (_exceptOccurred)
         {
@@ -112,12 +106,11 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
     }
 }
 
-string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data, size_t offset)
+string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data)
 {
     try
     {
-        size_t sizeToProcess = min(_size, data->getSize() - offset);
-        auto result = md5(data->get() + offset, sizeToProcess);
+        auto result = md5(data->get(), data->getSize());
         _writerCv.notify_all(); // notify writer to begin writing file
         return result;
     }
@@ -135,18 +128,14 @@ string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data, size_t offset)
     return {};
 }
 
-void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data, size_t offset)
+void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
 {
     // this method is only used in main method Hash
     // so we don't need to redirect exceptions to eptr
     unique_lock<mutex> locker(_m);
 
-    if (_resultQueue.size() > _threads)
-    {
-        _readerCv.wait(locker); // waiting a future to finish and free memory
-    }
-
-    _resultQueue.push(async(&MultiThreadHasher::hashOneBlock, this, data, offset));
+    _readerCv.wait(locker, [this]() { return this->_resultQueue.size() < _threads; }); // waiting a future to finish and free memory
+    _resultQueue.push(async(launch::async, &MultiThreadHasher::hashOneBlock, this, data));
 }
 
 void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
@@ -159,11 +148,7 @@ void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
             {
                 unique_lock<mutex> locker(_m);
 
-                if (_resultQueue.empty())
-                {
-                    _writerCv.wait(locker);
-                }
-
+                _writerCv.wait(locker, [this]() { return !this->_resultQueue.empty(); });
                 _resultQueue.front().wait();
 
                 if (_exceptOccurred)
