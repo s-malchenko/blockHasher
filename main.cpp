@@ -117,7 +117,7 @@ int main(int argc, char **argv)
         }
 
         cout << "Hashing " << input << " by blocks of " << blockSize <<
-             " to file " << output << endl;
+             " bytes to file " << output << endl;
 
         hasherPtr->Hash(input, output);
         auto msec = duration_cast<milliseconds>(steady_clock::now() - start).count();

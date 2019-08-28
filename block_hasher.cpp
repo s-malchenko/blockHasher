@@ -66,31 +66,34 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
     _run = true;
     thread writer(&MultiThreadHasher::writerThread, this, output);
 
-    while (true)
+    try // exception handling needed for joining to writer thread
     {
-        // Read data from file to buffer and add to processing queue.
-        // Reading data for all threads at once is not always memory efficient but
-        // can be faster with large block size.
-        size_t count = input->readsome(reinterpret_cast<char *>(data->get()), data->getCapacity());
-        data->setSize(count);
-        addHasherThread(data);
-
-        if (_exceptOccurred)
+        while (true)
         {
-            if (writer.joinable()) // join writer thread for avoiding termination
+            // Read data from file to buffer and add to processing queue.
+            // Reading data for all threads at once is not always memory efficient but
+            // can be faster with large block size.
+            size_t count = input->readsome(reinterpret_cast<char *>(data->get()), data->getCapacity());
+            data->setSize(count);
+            addHasherThread(data);
+
+            if (_exceptOccurred ||               // exit cycle if exception was thrown
+                    count < data->getCapacity()) // last segment processed
             {
-                writer.join();
+                break;
             }
 
-            rethrow_exception(_exceptPtr); // current method is always in main thread so we can safely rethrow
+            data = make_shared<Buffer>(_size);
         }
-
-        if (count < data->getCapacity()) // last segment
+    }
+    catch (const exception &e)
+    {
+        if (!_exceptOccurred)
         {
-            break;
+            _exceptPtr = current_exception();
+            _exceptOccurred = true;
+            _writerCv.notify_all(); // notify writer to detect exception
         }
-
-        data = make_shared<Buffer>(_size);
     }
 
     _run = false;
@@ -108,24 +111,20 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
 
 string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data)
 {
+    string result;
+
     try
     {
-        auto result = md5(data->get(), data->getSize());
+        result = md5(data->get(), data->getSize());
         _writerCv.notify_all(); // notify writer to begin writing file
-        return result;
     }
-    catch (const exception &e)
+    catch (...)
     {
-        if (!_exceptOccurred)
-        {
-            _exceptPtr = current_exception();
-            _exceptOccurred = true;
-        }
-
-        _readerCv.notify_all(); // awake probably sleeping thread to detect exception
+        _writerCv.notify_all(); // notify writer to detect exception
+        throw;
     }
 
-    return {};
+    return result;
 }
 
 void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
@@ -140,6 +139,18 @@ void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
 
 void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
 {
+    auto pred = [this]()
+    {
+        // if exception occured before any items was inserted to queue,
+        // we need to awake writer and make it jump over _resultQueue.front().wait()
+        if (_exceptOccurred)
+        {
+            rethrow_exception(_exceptPtr);
+        }
+
+        return !this->_resultQueue.empty();
+    };
+
     try
     {
         string hash;
@@ -148,7 +159,7 @@ void MultiThreadHasher::writerThread(shared_ptr<ostream> output)
             {
                 unique_lock<mutex> locker(_m);
 
-                _writerCv.wait(locker, [this]() { return !this->_resultQueue.empty(); });
+                _writerCv.wait(locker, pred);
                 _resultQueue.front().wait();
 
                 if (_exceptOccurred)
