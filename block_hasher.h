@@ -28,7 +28,7 @@ protected:
     size_t _size; // block size in bytes
 
     /**
-     * @brief      Simple class for buffer with size.
+     * @brief      Simple class for buffer with size and capacity.
      */
     class Buffer
     {
@@ -52,7 +52,16 @@ protected:
             _dataSize = newSize < _capacity ? newSize : _capacity;
         }
 
-        size_t getSize() const { return _dataSize; }
+        size_t getSize() const
+        {
+            return _dataSize;
+        }
+
+        size_t getCapacity() const
+        {
+            return _capacity;
+        }
+
     private:
         uint8_t *_ptr;
         size_t _dataSize = 0;
@@ -81,11 +90,11 @@ public:
 private:
     size_t _threads;    // number of simultaneously processed threads
     std::mutex _m;      // mutex for access to _resultQueue
-    std::mutex _eMutex; // mutex for access to _exceptPtr
     std::queue<std::future<std::string>> _resultQueue; // queue of calculated hashes
     std::condition_variable _writerCv, _readerCv; // condition variables to wake up reader and writer threads
     std::atomic_bool _run;                        // run flag
     std::exception_ptr _exceptPtr = nullptr;      // ptr for handling exceptions in threads
+    std::atomic_bool _exceptOccurred = false;     // exception flag
 
     /**
      * @brief      Hashes data block.

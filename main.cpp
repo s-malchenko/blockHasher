@@ -17,6 +17,9 @@ static void printUsage()
     cout << "       [-b <block size in bytes, default is 1 MB>]" << endl;
 }
 
+/**
+ * @brief      Class for parsing command line options.
+ */
 class InputParser
 {
 public:
