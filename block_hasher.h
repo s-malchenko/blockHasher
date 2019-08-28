@@ -103,14 +103,14 @@ private:
      *
      * @return     Hash.
      */
-    std::string hashOneBlock(std::shared_ptr<Buffer> data);
+    std::string hashOneBlock(std::shared_ptr<Buffer> data, size_t offset);
 
     /**
      * @brief      Adds a hasher future to the queue.
      *
      * @param[in]  data  The data
      */
-    void addHasherThread(std::shared_ptr<Buffer> data);
+    void addHasherThread(std::shared_ptr<Buffer> data, size_t offset);
 
     /**
      * @brief      Thread function for writing calculated hashes to stream.

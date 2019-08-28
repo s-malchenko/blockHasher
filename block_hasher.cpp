@@ -6,6 +6,7 @@
 #include <fstream>
 #include <utility>
 #include <functional>
+#include <algorithm>
 
 using namespace std;
 
@@ -42,7 +43,7 @@ void SingleThreadHasher::Hash(const string &inputFile, const string &outputFile)
         data->setSize(count);
         *output << md5(data->get(), data->getSize()) << endl;
 
-        if (count < _size)
+        if (count < data->getCapacity())
         {
             break;
         }
@@ -54,27 +55,30 @@ void SingleThreadHasher::Hash(const string &inputFile, const string &outputFile)
 MultiThreadHasher::MultiThreadHasher(size_t blockSize, size_t threads) :
     BlockHasher(blockSize)
 {
-    _threads = threads < 1 ? 1 : threads;
+    _threads = max(static_cast<size_t>(1), threads);
 }
 
 void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &outputFile)
 {
     auto [input, output] = openFiles(inputFile, outputFile);
-    auto data = make_shared<Buffer>(_size);
+    auto data = make_shared<Buffer>(_size * _threads); // buffer enough for data to process by all parallel threads
 
     _run = true;
     thread writer(&MultiThreadHasher::writerThread, this, output);
 
     while (true)
     {
-        // read data from file to buffer and add to processing queue
+        // Read data from file to buffer and add to processing queue.
+        // Reading data for all threads at once is not always memory efficient but
+        // can be faster with large block size.
         size_t count = input->readsome(reinterpret_cast<char *>(data->get()), data->getCapacity());
         data->setSize(count);
-        addHasherThread(data);
+        size_t offset = 0;
 
-        if (count < _size) // last segment
+        while (offset < count)
         {
-            break;
+            addHasherThread(data, offset);
+            offset += _size; // last segment of one buffer handles in hashOneBlock
         }
 
         if (_exceptOccurred)
@@ -85,6 +89,11 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
             }
 
             rethrow_exception(_exceptPtr); // current method is always in main thread so we can safely rethrow
+        }
+
+        if (count < data->getCapacity()) // last segment
+        {
+            break;
         }
 
         data = make_shared<Buffer>(_size);
@@ -103,11 +112,12 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
     }
 }
 
-string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data)
+string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data, size_t offset)
 {
     try
     {
-        auto result = md5(data->get(), data->getSize());
+        size_t sizeToProcess = min(_size, data->getSize() - offset);
+        auto result = md5(data->get() + offset, sizeToProcess);
         _writerCv.notify_all(); // notify writer to begin writing file
         return result;
     }
@@ -125,7 +135,7 @@ string MultiThreadHasher::hashOneBlock(shared_ptr<Buffer> data)
     return {};
 }
 
-void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
+void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data, size_t offset)
 {
     // this method is only used in main method Hash
     // so we don't need to redirect exceptions to eptr
@@ -136,7 +146,7 @@ void MultiThreadHasher::addHasherThread(shared_ptr<Buffer> data)
         _readerCv.wait(locker); // waiting a future to finish and free memory
     }
 
-    _resultQueue.push(async(&MultiThreadHasher::hashOneBlock, this, data));
+    _resultQueue.push(async(&MultiThreadHasher::hashOneBlock, this, data, offset));
 }
 
 void MultiThreadHasher::writerThread(shared_ptr<ostream> output)

@@ -12,3 +12,4 @@ target_compile_options(blockHasher PRIVATE -std=c++1z -O2 -Wall -Werror -Wextra 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(blockHasher Threads::Threads)
+target_link_options(blockHasher PRIVATE -static)

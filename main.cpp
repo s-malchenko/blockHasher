@@ -65,7 +65,7 @@ int main(int argc, char **argv)
         size_t threads = 0; // 0 for single-thread implementation
 
         auto parser = InputParser(argc, argv);
-        auto sizeStr = parser.getCmdOption("-b");
+        auto sizeStr = parser.getCmdOption("-b"); // parsing block size if present
 
         if (!sizeStr.empty())
         {
@@ -85,12 +85,12 @@ int main(int argc, char **argv)
         string output(argv[2]);
         auto start = steady_clock::now();
 
-        if (parser.cmdOptionExists("-m"))
+        if (parser.cmdOptionExists("-m")) // setting multithread mode
         {
             threads = 4; // default number of threads
         }
 
-        auto threadsStr = parser.getCmdOption("-m");
+        auto threadsStr = parser.getCmdOption("-m");// parsing threads count if present
 
         if (!threadsStr.empty())
         {
@@ -108,12 +108,12 @@ int main(int argc, char **argv)
         if (threads > 0)
         {
             hasherPtr = make_unique<MultiThreadHasher>(blockSize, threads);
-            cout << "Multithreading mode, " << threads << " threads" << endl;
+            cout << "Multithreading mode, max " << threads << " threads" << endl;
         }
         else
         {
             hasherPtr = make_unique<SingleThreadHasher>(blockSize);
-            cout << "Single thread mode" << endl;
+            cout << "Single-thread mode" << endl;
         }
 
         cout << "Hashing " << input << " by blocks of " << blockSize <<
