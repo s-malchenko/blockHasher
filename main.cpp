@@ -15,6 +15,7 @@ static void printUsage()
 {
     cout << "Usage: blockHasher <file to hash> <output file>" << endl;
     cout << "       [-b <block size in bytes, default is 1 MB>]" << endl;
+    cout << "       [-m [threads count, default is 4]" << endl;
 }
 
 /**
@@ -61,6 +62,7 @@ int main(int argc, char **argv)
         }
 
         size_t blockSize = 1024 * 1024; // 1 MB default block size
+        size_t threads = 0; // 0 for single-thread implementation
 
         auto parser = InputParser(argc, argv);
         auto sizeStr = parser.getCmdOption("-b");
@@ -85,15 +87,37 @@ int main(int argc, char **argv)
 
         if (parser.cmdOptionExists("-m"))
         {
-            hasherPtr = make_unique<MultiThreadHasher>(blockSize);
+            threads = 4; // default number of threads
+        }
+
+        auto threadsStr = parser.getCmdOption("-m");
+
+        if (!threadsStr.empty())
+        {
+            try
+            {
+                threads = stoll(threadsStr);
+            }
+            catch (...)
+            {
+                printUsage();
+                return -1;
+            }
+        }
+
+        if (threads > 0)
+        {
+            hasherPtr = make_unique<MultiThreadHasher>(blockSize, threads);
+            cout << "Multithreading mode, " << threads << " threads" << endl;
         }
         else
         {
             hasherPtr = make_unique<SingleThreadHasher>(blockSize);
+            cout << "Single thread mode" << endl;
         }
 
         cout << "Hashing " << input << " by blocks of " << blockSize <<
-             " to file " << output << " ..." << endl;
+             " to file " << output << endl;
 
         hasherPtr->Hash(input, output);
         auto msec = duration_cast<milliseconds>(steady_clock::now() - start).count();
