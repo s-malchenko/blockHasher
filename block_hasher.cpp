@@ -77,9 +77,9 @@ void MultiThreadHasher::Hash(const std::string &inputFile, const std::string &ou
 
         if (_exceptOccurred)
         {
-            if (writer.joinable()) // detach writer thread for avoiding termination
+            if (writer.joinable()) // join writer thread for avoiding termination
             {
-                writer.detach();
+                writer.join();
             }
 
             rethrow_exception(_exceptPtr); // current method is always in main thread so we can safely rethrow
